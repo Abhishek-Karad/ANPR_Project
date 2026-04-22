@@ -306,7 +306,22 @@ def generate_frames():
             continue
 
 # ======================= API ENDPOINTS =======================
+def calculate_fare(entry_time, exit_time):
+    """Simple fare calculation"""
+    fmt = "%H:%M:%S"
+    entry = datetime.strptime(entry_time, fmt)
+    exit = datetime.strptime(exit_time, fmt)
 
+    minutes = (exit - entry).total_seconds() / 60
+
+    # Pricing logic
+    if minutes <= 30:
+        fare = 20
+    else:
+        hours = minutes / 60
+        fare = 20 + (hours * 40)
+
+    return round(fare, 2), round(minutes, 2)
 @app.get("/")
 async def read_root():
     """Serve HTML page"""
@@ -380,26 +395,45 @@ async def record_exit(plate: str = None):
         
         if plate_to_record in vehicle_db and vehicle_db[plate_to_record]['exit'] is None:
             vehicle_db[plate_to_record]['exit'] = now
+
+            # 💰 FARE CALCULATION (NEW)
+            entry_time = vehicle_db[plate_to_record]['entry']
+            fare, duration = calculate_fare(entry_time, now)
             
             connection = get_db_connection()
             if connection:
                 cursor = connection.cursor()
+                
+                # If you DID NOT add fare column → use this
                 cursor.execute(
-                    "UPDATE vehicles SET exit_time = %s WHERE plate = %s ORDER BY id DESC LIMIT 1",
-                    (now, plate_to_record)
+                    "UPDATE vehicles SET exit_time = %s, duration = %s WHERE plate = %s ORDER BY id DESC LIMIT 1",
+                    (now, f"{duration} mins", plate_to_record)
                 )
+
+                # If you ADDED fare column → use this instead
+                # cursor.execute(
+                #     "UPDATE vehicles SET exit_time = %s, duration = %s, fare = %s WHERE plate = %s ORDER BY id DESC LIMIT 1",
+                #     (now, f"{duration} mins", fare, plate_to_record)
+                # )
+
                 connection.commit()
                 cursor.close()
                 connection.close()
             
-            print(f"✅ EXIT: {plate_to_record} at {now}")
-            return {"success": True, "message": f"✅ Exit recorded for {plate_to_record} at {now}"}
+            print(f"💰 EXIT: {plate_to_record} | Duration: {duration} mins | Fare: ₹{fare}")
+
+            return {
+                "success": True,
+                "message": f"✅ Exit recorded for {plate_to_record}",
+                "duration": f"{duration} mins",
+                "fare": f"₹{fare}"
+            }
+
         else:
             return {"success": False, "message": "⚠️ Cannot record exit for this plate"}
     
     except Exception as e:
         return {"success": False, "error": str(e)}
-
 @app.get("/api/vehicles")
 async def get_vehicles():
     """Get all vehicle logs"""
